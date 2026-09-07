@@ -96,6 +96,10 @@ func TestNodeFailureReconciler(t *testing.T) {
 
 	workloadWithUnhealthyNode := baseWorkload.DeepCopy()
 	workloadWithUnhealthyNode.Status.UnhealthyNodes = []kueue.UnhealthyNode{{Name: nodeName}}
+
+	wlUnhealthyNodes := baseWorkload.DeepCopy()
+	wlUnhealthyNodes.Status.UnhealthyNodes = []kueue.UnhealthyNode{{Name: nodeName}}
+
 	workloadWithTwoNodes := utiltestingapi.MakeWorkload(wlName, nsName).
 		Finalizers(kueue.ResourceInUseFinalizerName).
 		PodSets(*utiltestingapi.MakePodSet(kueue.DefaultPodSetName, 2).Request(corev1.ResourceCPU, "1").Obj()).
@@ -630,6 +634,25 @@ func TestNodeFailureReconciler(t *testing.T) {
 				features.TASReplaceNodeOnNodeTaints:               true,
 				features.TASReplaceNodeOnPodTermination:           false,
 				features.TASReplaceNodeDueToNotReadyOverFixedTime: true,
+			},
+		},
+		"Node has untolerated NoExecute taint, ReplaceNodeOnPodTermination on, with UnhealthyNodes - UnhealthyNodes NOT cleared (bug)": {
+			initObjs: []client.Object{
+				baseNode.Clone().StatusConditions(corev1.NodeCondition{
+					Type:               corev1.NodeReady,
+					Status:             corev1.ConditionTrue,
+					LastTransitionTime: now}).
+					Taints(corev1.Taint{Key: "foo", Effect: corev1.TaintEffectNoExecute}).Obj(),
+				baseWorkload.DeepCopy(),
+				basePod.DeepCopy(),
+			},
+			// Set UnhealthyNodes on workload - this should NOT be cleared
+			wlUnhealthyNodes: []kueue.UnhealthyNode{{Name: nodeName}},
+			reconcileRequests:  []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
+			wantUnhealthyNodes: []kueue.UnhealthyNode{{Name: nodeName}},
+			featureGates: map[featuregate.Feature]bool{
+				features.TASReplaceNodeOnNodeTaints:     true,
+				features.TASReplaceNodeOnPodTermination: true,
 			},
 		},
 		"Node has NoExecute taint with TolerationSeconds, ReplaceNodeOnPodTermination off -> Healthy (wait for eviction)": {
